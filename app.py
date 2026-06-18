@@ -8,11 +8,8 @@ import io
 import re
 import base64
 from datetime import datetime, timedelta
-import tkinter as tk
-from tkinter import ttk, messagebox
-import platform # Đã thêm: Kiểm tra hệ điều hành
 
-from flask import Flask, request, jsonify, render_template, render_template_string # Đã thêm: render_template_string
+from flask import Flask, request, jsonify, render_template
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter
 import openpyxl
@@ -31,14 +28,12 @@ os.makedirs(TEMP_IMAGES_DIR, exist_ok=True)
 
 DB_PARKING = os.path.join(DATA_DIR, 'parking.db')
 
-# --- ĐÃ SỬA: SỬA ĐƯỜNG DẪN TESSERACT CHO PHÙ HỢP LOCAL VÀ RENDER ---
-# Dòng code cũ (Giữ lại dưới dạng comment để bạn đối chiếu):
-# pytesseract.pytesseract.tesseract_cmd = os.path.join(DATA_DIR, 'Tesseract-OCR', 'tesseract.exe')
-if platform.system() == 'Windows':
+# Tự động nhận diện môi trường để cấu hình đường dẫn Tesseract OCR
+IS_RENDER = os.environ.get('RENDER') is not None
+if not IS_RENDER:
     pytesseract.pytesseract.tesseract_cmd = os.path.join(DATA_DIR, 'Tesseract-OCR', 'tesseract.exe')
 else:
-    # Trên Linux (Render), tesseract_cmd gọi trực tiếp từ hệ thống
-    pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+    pytesseract.pytesseract.tesseract_cmd = 'tesseract'
 
 app = Flask(__name__)
 app.secret_key = 'parking_admin_secret_key'
@@ -76,142 +71,25 @@ def get_local_ip():
     except Exception:
         return "127.0.0.1"
 
-# ==========================================
-# GIAO DIỆN WEB NHÚNG TRỰC TIẾP VÀO APP.PY (THAY CHO templates/index.html)
-# ==========================================
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hệ Thống Quét Biển Số Web</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px; text-align: center; }
-        .container { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        h1 { color: #1e293b; font-size: 24px;}
-        .btn { display: inline-block; background: #3b82f6; color: white; padding: 12px 20px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; margin-top: 15px; font-weight: bold;}
-        .btn:hover { background: #2563eb; }
-        #preview { max-width: 100%; margin-top: 15px; border-radius: 8px; display: none; }
-        .result-box { margin-top: 20px; padding: 15px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; display: none; text-align: left; }
-        .success { color: #047857; font-weight: bold; font-size: 18px; margin-bottom: 10px;}
-        .error { color: #b91c1c; font-weight: bold; }
-        .loading { display: none; margin-top: 15px; font-weight: bold; color: #d97706; }
-        p { margin: 8px 0; font-size: 15px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>📸 Chụp / Tải Ảnh Biển Số</h1>
-        <p style="color: #64748b;">Hệ thống tự động ghi nhận bãi & tính tiền</p>
-        
-        <input type="file" id="imageInput" accept="image/*" capture="environment" style="display: none;" onchange="previewImage(event)">
-        <label for="imageInput" class="btn" style="background: #10b981;">Tải ảnh lên / Mở Camera</label>
-        
-        <img id="preview" alt="Preview">
-        
-        <br>
-        <button id="uploadBtn" class="btn" onclick="uploadImage()" style="display: none; background: #ef4444;">Quét Biển Số</button>
-        
-        <div id="loading" class="loading">⏳ Đang xử lý hình ảnh OCR...</div>
-        
-        <div id="resultBox" class="result-box">
-            <div id="msg" class="success"></div>
-            <p><b>Biển số:</b> <span id="resPlate"></span></p>
-            <p><b>Trạng thái:</b> <span id="resStatus"></span></p>
-            <p><b>Thời gian đỗ:</b> <span id="resDuration"></span></p>
-            <p><b>Phí tính:</b> <span id="resFee"></span> VNĐ</p>
-            <img id="resImage" style="max-width: 100%; margin-top: 10px; border-radius: 8px;">
-        </div>
-    </div>
-
-    <script>
-        let selectedFile = null;
-
-        function previewImage(event) {
-            selectedFile = event.target.files[0];
-            if (selectedFile) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    document.getElementById('preview').src = e.target.result;
-                    document.getElementById('preview').style.display = 'block';
-                    document.getElementById('uploadBtn').style.display = 'inline-block';
-                    document.getElementById('resultBox').style.display = 'none';
-                }
-                reader.readAsDataURL(selectedFile);
-            }
-        }
-
-        function uploadImage() {
-            if (!selectedFile) return alert("Vui lòng chọn ảnh trước!");
-            
-            let formData = new FormData();
-            formData.append("image", selectedFile);
-
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('resultBox').style.display = 'none';
-            document.getElementById('uploadBtn').disabled = true;
-
-            fetch('/upload-ocr', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('uploadBtn').disabled = false;
-                document.getElementById('resultBox').style.display = 'block';
-
-                if (data.error) {
-                    document.getElementById('resultBox').style.background = '#fef2f2';
-                    document.getElementById('resultBox').style.borderColor = '#fecaca';
-                    document.getElementById('msg').className = 'error';
-                    document.getElementById('msg').innerText = "❌ Lỗi: " + data.error;
-                    document.getElementById('resPlate').innerText = "-";
-                    document.getElementById('resStatus').innerText = "-";
-                    document.getElementById('resDuration').innerText = "-";
-                    document.getElementById('resFee').innerText = "-";
-                    document.getElementById('resImage').style.display = 'none';
-                } else {
-                    document.getElementById('resultBox').style.background = '#f0fdf4';
-                    document.getElementById('resultBox').style.borderColor = '#bbf7d0';
-                    document.getElementById('msg').className = 'success';
-                    document.getElementById('msg').innerText = "✅ " + data.message;
-                    document.getElementById('resPlate').innerText = data.plate;
-                    
-                    let statusColor = data.status === "VÔ" ? "#ef4444" : "#10b981";
-                    document.getElementById('resStatus').innerHTML = `<span style="color: ${statusColor}; font-weight:bold;">${data.status}</span>`;
-                    
-                    document.getElementById('resDuration').innerText = data.duration || "Đang ở trong bãi";
-                    document.getElementById('resFee').innerText = data.fee || "0";
-                    
-                    if (data.image_base64) {
-                        document.getElementById('resImage').src = "data:image/jpeg;base64," + data.image_base64;
-                        document.getElementById('resImage').style.display = 'block';
-                    }
-                }
-            })
-            .catch(err => {
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('uploadBtn').disabled = false;
-                alert("Lỗi kết nối tới máy chủ Render!");
-            });
-        }
-    </script>
-</body>
-</html>
-"""
+# Khởi tạo cơ sở dữ liệu và file excel ngay khi chạy app
+init_db()
+init_excel()
 
 # ==========================================
-# 2. FLASK ROUTES (WEB NHẬN ẢNH)
+# 2. FLASK ROUTES & XỬ LÝ OCR (WEB API)
 # ==========================================
 
 @app.route('/')
 def index():
-    # Dòng cũ (Bắt buộc giữ lại làm comment theo yêu cầu): 
-    # return render_template('index.html')
-    # Gọi template nhúng để gom vào duy nhất 1 file:
-    return render_template_string(HTML_TEMPLATE)
+    return render_template('index.html')
+
+@app.route('/cam')
+def camera_scan():
+    return render_template('cam.html')
+
+@app.route('/admin')
+def admin_dashboard():
+    return render_template('admin.html')
 
 @app.route('/ping', methods=['POST'])
 def ping():
@@ -365,6 +243,10 @@ def process_image():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ==========================================
+# 3. LOGIC THỐNG KÊ DATA CHO WEB ADMIN
+# ==========================================
+
 def get_stats():
     try:
         conn = sqlite3.connect(DB_PARKING)
@@ -391,149 +273,48 @@ def get_recent_logs(limit=50):
     except:
         return []
 
-# ==========================================
-# 3. GIAO DIỆN DESKTOP (TKINTER)
-# ==========================================
-
-class DesktopParkingApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Admin - Quản Lý Bãi Giữ Xe")
-        self.root.geometry("1100x650") 
-        self.root.configure(bg="#f1f5f9") 
-        
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure("Treeview.Heading", font=('Inter', 11, 'bold'), background="#e2e8f0", foreground="#1e293b")
-        style.configure("Treeview", font=('Inter', 10), rowheight=30, background="white", fieldbackground="white")
-        style.map('Treeview', background=[('selected', '#eff6ff')], foreground=[('selected', '#1d4ed8')])
-
-        self.create_dashboard()
-            
-    def create_dashboard(self):
-        header_card = tk.Frame(self.root, bg="white", bd=1, relief="solid")
-        header_card.pack(fill='x', padx=20, pady=15)
-        
-        ip_address = get_local_ip()
-        tk.Label(header_card, text=f"🟢 Server Web Đang Chạy: http://{ip_address}:5000", 
-                 font=('Inter', 13, 'bold'), fg='#059669', bg='white').pack(pady=10)
-        
-        cards_frame = tk.Frame(self.root, bg="#f1f5f9")
-        cards_frame.pack(fill='x', padx=20, pady=(0, 15))
-        
-        card1 = tk.Frame(cards_frame, bg="white", bd=1, relief="solid")
-        card1.pack(side='left', expand=True, fill='both', padx=(0, 10))
-        tk.Frame(card1, bg="#ef4444", height=5).pack(fill='x', side='top')
-        tk.Label(card1, text="XE ĐANG TRONG BÃI", font=('Inter', 12, 'bold'), fg='#64748b', bg='white').pack(pady=(15,5))
-        self.lbl_inside = tk.Label(card1, text="0", font=('Inter', 36, 'bold'), fg='#1e293b', bg='white')
-        self.lbl_inside.pack(pady=(0, 15))
-
-        card2 = tk.Frame(cards_frame, bg="white", bd=1, relief="solid")
-        card2.pack(side='left', expand=True, fill='both', padx=(10, 0))
-        tk.Frame(card2, bg="#10b981", height=5).pack(fill='x', side='top')
-        tk.Label(card2, text="LƯỢT XE RA (HÔM NAY)", font=('Inter', 12, 'bold'), fg='#64748b', bg='white').pack(pady=(15,5))
-        self.lbl_out = tk.Label(card2, text="0", font=('Inter', 36, 'bold'), fg='#1e293b', bg='white')
-        self.lbl_out.pack(pady=(0, 15))
-
-        tables_container = tk.Frame(self.root, bg="#f1f5f9")
-        tables_container.pack(expand=True, fill='both', padx=20, pady=(0, 20))
-
-        frame_in = tk.Frame(tables_container, bg="white", bd=1, relief="solid")
-        frame_in.pack(side='left', expand=True, fill='both', padx=(0, 10))
-        
-        tk.Label(frame_in, text="🔴 LỊCH SỬ XE VÀO BÃI", font=('Inter', 11, 'bold'), fg='#ef4444', bg='white').pack(anchor='w', padx=15, pady=10)
-        
-        self.tree_in = ttk.Treeview(frame_in, columns=("icon", "plate", "time_in"), show='headings', height=10)
-        self.tree_in.heading("icon", text="Trạng Thái")
-        self.tree_in.heading("plate", text="Biển Số Xe")
-        self.tree_in.heading("time_in", text="Thời Gian Vào")
-        
-        self.tree_in.column("icon", anchor="center", width=90)
-        self.tree_in.column("plate", anchor="center", width=120)
-        self.tree_in.column("time_in", anchor="center", width=180)
-        
-        self.tree_in.tag_configure('tag_VO', foreground='#ef4444', font=('Inter', 10, 'bold'))
-        self.tree_in.pack(fill='both', expand=True, padx=15, pady=(0, 15))
-
-        frame_out = tk.Frame(tables_container, bg="white", bd=1, relief="solid")
-        frame_out.pack(side='left', expand=True, fill='both', padx=(10, 0))
-        
-        tk.Label(frame_out, text="🟢 XE XUẤT BẾN & TÍNH TIỀN (Tự ẩn sau 30s)", font=('Inter', 11, 'bold'), fg='#10b981', bg='white').pack(anchor='w', padx=15, pady=10)
-        
-        self.tree_out = ttk.Treeview(frame_out, columns=("icon", "plate", "duration", "fee"), show='headings', height=10)
-        self.tree_out.heading("icon", text="Trạng Thái")
-        self.tree_out.heading("plate", text="Biển Số")
-        self.tree_out.heading("duration", text="Thời Gian Đậu")
-        self.tree_out.heading("fee", text="Thành Tiền")
-        
-        self.tree_out.column("icon", anchor="center", width=90)
-        self.tree_out.column("plate", anchor="center", width=120)
-        self.tree_out.column("duration", anchor="center", width=110)
-        self.tree_out.column("fee", anchor="center", width=130)
-        
-        self.tree_out.tag_configure('tag_RA', foreground='#10b981', font=('Inter', 10, 'bold'))
-        self.tree_out.pack(fill='both', expand=True, padx=15, pady=(0, 15))
-
-        self.update_dashboard()
-
-    def update_dashboard(self):
-        inside, out_today = get_stats()
-        self.lbl_inside.config(text=str(inside))
-        self.lbl_out.config(text=str(out_today))
-
-        for item in self.tree_in.get_children(): self.tree_in.delete(item)
-        for item in self.tree_out.get_children(): self.tree_out.delete(item)
-            
-        logs = get_recent_logs()
-        current_time = datetime.now()
-
-        for log in logs:
-            plate, time_in, time_out, status = log
-            
-            if status == "VÔ":
-                self.tree_in.insert("", "end", values=("📥 VÀO", plate, time_in), tags=('tag_VO',))
-            elif status == "RA" and time_out:
-                try:
-                    t_in = datetime.strptime(time_in, "%Y-%m-%d %H:%M:%S")
-                    t_out = datetime.strptime(time_out, "%Y-%m-%d %H:%M:%S")
-                    seconds_diff = (current_time - t_out).total_seconds()
-                    
-                    if seconds_diff <= 30:
-                        minutes = int((t_out - t_in).total_seconds() // 60)
-                        fee = minutes * 50
-                        duration_str = f"{minutes} phút"
-                        fee_str = f"{fee:,} VNĐ"
-                        
-                        self.tree_out.insert("", "end", values=("📤 RA", plate, duration_str, fee_str), tags=('tag_RA',))
-                except Exception:
-                    pass 
-
-        self.root.after(2000, self.update_dashboard)
-
-def run_flask_server():
-    # Render tự cấp phát biến môi trường PORT, nếu không có lấy mặc định 5000
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+@app.route('/api/admin-data', methods=['GET'])
+def get_admin_data():
+    inside, out_today = get_stats()
+    raw_logs = get_recent_logs()
+    
+    logs_in = []
+    logs_out = []
+    current_time = datetime.now()
+    
+    for log in raw_logs:
+        plate, time_in, time_out, status = log
+        if status == "VÔ":
+            logs_in.append({
+                'plate': plate,
+                'time_in': time_in
+            })
+        elif status == "RA" and time_out:
+            try:
+                t_in = datetime.strptime(time_in, "%Y-%m-%d %H:%M:%S")
+                t_out = datetime.strptime(time_out, "%Y-%m-%d %H:%M:%S")
+                seconds_diff = (current_time - t_out).total_seconds()
+                
+                # Logic ẩn sau 30 giây giống hệt Tkinter cũ
+                if seconds_diff <= 30:
+                    minutes = int((t_out - t_in).total_seconds() // 60)
+                    fee = minutes * 50
+                    logs_out.append({
+                        'plate': plate,
+                        'duration': f"{minutes} phút",
+                        'fee': f"{fee:,} VNĐ"
+                    })
+            except:
+                pass
+                
+    return jsonify({
+        'inside': inside,
+        'out_today': out_today,
+        'logs_in': logs_in,
+        'logs_out': logs_out,
+        'local_ip': get_local_ip()
+    })
 
 if __name__ == '__main__':
-    init_db()
-    init_excel()
-    
-    # --- ĐÃ SỬA: TỰ ĐỘNG NHẬN DIỆN MÔI TRƯỜNG ĐỂ TRÁNH LỖI TKINTER TRÊN RENDER ---
-    if os.environ.get('RENDER') or os.environ.get('PORT'):
-        print("Môi trường: Render (Cloud Server). Đang khởi chạy luồng API...")
-        # Vì Render là Web Service, ta chạy app Flask bằng main thread để server sống
-        run_flask_server()
-    else:
-        print("Môi trường: Máy tính cá nhân (Local). Khởi chạy kèm Tkinter Admin...")
-        threading.Thread(target=run_flask_server, daemon=True).start()
-        
-        try:
-            root = tk.Tk()
-            app_gui = DesktopParkingApp(root)
-            root.protocol("WM_DELETE_WINDOW", root.destroy)
-            root.mainloop()
-        except Exception as e:
-            print("Không thể khởi động Desktop GUI. Giữ app Flask tiếp tục chạy ngầm...")
-            while True:
-                time.sleep(100)
+    # Chạy trực tiếp web server local
+    app.run(host='0.0.0.0', port=5000, debug=True)
