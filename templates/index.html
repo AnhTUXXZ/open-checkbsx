@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Quét Biển Số - Hệ Thống Giữ Xe</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <style>
+        :root { --blue: #2563eb; --green: #10b981; --red: #ef4444; --dark: #1e293b; }
+        * { box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: #f1f5f9; margin: 0; padding: 10px; color: var(--dark); }
+        .container { width: 100%; max-width: 600px; background: white; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); margin: auto; overflow: hidden; }
+        
+        .banner { width: 100%; height: 140px; background: url('https://images.unsplash.com/photo-1573348722427-f1d6819fdf98?q=80&w=1000&auto=format&fit=crop') center/cover; position: relative; }
+        .banner-overlay { position: absolute; inset: 0; background: linear-gradient(to top, rgba(37, 99, 235, 0.9), transparent); display: flex; flex-direction: column; justify-content: flex-end; padding: 15px; color: white; }
+        .banner h1 { margin: 0; font-size: 18px; text-transform: uppercase; }
+
+        .content { padding: 20px; }
+        .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .card { border: 2px dashed #cbd5e1; padding: 12px; border-radius: 12px; text-align: center; font-size: 12px; cursor: pointer; transition: 0.2s; font-weight: 600; }
+        .card:hover { border-color: var(--blue); background: #eff6ff; transform: translateY(-2px); }
+        
+        .btn { border: none; border-radius: 10px; cursor: pointer; font-weight: 700; width: 100%; transition: 0.3s; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; }
+        .btn:active { transform: scale(0.98); }
+        .btn-primary { background: var(--blue); color: white; font-size: 16px; margin-top: 10px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3); }
+        .btn-camera { background: #475569; color: white; }
+
+        #previewImage { width: 100%; max-height: 200px; object-fit: contain; border-radius: 10px; margin-top: 15px; display: none; border: 1px solid #ddd; background: #fafafa; }
+        #cameraStream { width: 100%; max-height: 250px; border-radius: 10px; display: none; margin-top: 10px; object-fit: cover; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+
+        @keyframes slideUpFade { 0% { opacity: 0; transform: translateY(30px) scale(0.95); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
+
+        .modal { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(8px); z-index: 1000; padding: 15px; }
+        .modal-content { position: relative; background: white; margin: 10% auto; padding: 20px; border-radius: 20px; width: 100%; max-width: 450px; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.3); animation: slideUpFade 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        
+        .close-btn { position: absolute; top: 15px; right: 20px; font-size: 28px; color: #94a3b8; cursor: pointer; line-height: 1; font-weight: bold; transition: 0.2s; }
+        .close-btn:hover { color: var(--red); transform: rotate(90deg); }
+
+        .result-box { padding: 15px; margin-top: 10px; border-radius: 10px; border: 2px solid #e2e8f0; background: #f8fafc; }
+        .plate-display { font-size: 32px; font-weight: 900; letter-spacing: 2px; color: #0f172a; margin: 10px 0; padding: 10px; border: 2px dashed #94a3b8; border-radius: 8px; background: white; }
+        .status-VÔ { color: var(--red); font-weight: 800; font-size: 20px; text-shadow: 0 2px 4px rgba(239, 68, 68, 0.2); }
+        .status-RA { color: var(--green); font-weight: 800; font-size: 20px; text-shadow: 0 2px 4px rgba(16, 185, 129, 0.2); }
+        
+        #canvas { display: none; }
+        .status-msg { text-align: center; margin-top: 10px; font-weight: 600; font-size: 13px; }
+        
+        .scanner-badge { background: rgba(255, 255, 255, 0.25); border: 1px solid rgba(255, 255, 255, 0.5); padding: 5px 12px; border-radius: 20px; font-weight: 800; font-size: 13px; letter-spacing: 0.5px; backdrop-filter: blur(4px); white-space: nowrap; }
+        
+        .spinner { border: 4px solid rgba(37, 99, 235, 0.1); border-top: 4px solid var(--blue); border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        @media screen and (max-width: 600px) { .modal-content { margin: 15vh auto 0 auto; padding: 15px; max-height: 80vh; overflow-y: auto; } }
+        .swal2-popup { font-family: 'Inter', sans-serif !important; border-radius: 16px !important; }
+    </style>
+</head>
+<body>
+<br><br><br><br><br><br>
+<div class="container">
+    <div class="banner">
+        <div class="banner-overlay">
+            <div style="display: flex; justify-content: space-between; align-items: flex-end; width: 100%; gap: 10px;">
+                <div>
+                    <h1>Hệ Thống Quản Lý Bãi Xe</h1>
+                    <p style="margin: 3px 0 0; font-size: 11px;">Phát triển bởi Đội CNTT</p>
+                </div>
+                <div class="scanner-badge">MÁY QUÉT CAO CẤP</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="content">
+        <div class="upload-grid">
+            <div class="card" onclick="document.getElementById('imageInput').click()">
+                <span style="font-size: 20px;">📁</span><br>Tải Ảnh Lên
+                <input type="file" id="imageInput" accept="image/*" onchange="previewFile()" style="display:none;">
+            </div>
+            <div class="card" onclick="startCamera()">
+                <span style="font-size: 20px;">📷</span><br>Mở Máy Ảnh
+            </div>
+        </div>
+
+        <video id="cameraStream" autoplay playsinline></video>
+        <button id="snapBtn" class="btn" style="display:none; background:#f59e0b; color:white; box-shadow: 0 4px 14px rgba(245, 158, 11, 0.3);" onclick="takePhoto()">🚀 QUÉT BIỂN SỐ NGAY</button>
+        
+        <img id="previewImage" alt="Ảnh xe">
+        <canvas id="canvas"></canvas>
+
+        <button id="mainScanBtn" class="btn btn-primary" onclick="uploadAndReadImage()" style="display:none;">🚀 QUÉT BIỂN SỐ NGAY</button>
+        <div id="uploadStatus" class="status-msg"></div>
+    </div>
+</div>
+<br><br><br><br><br><br><br><br>
+
+<div id="loadingModal" class="modal">
+    <div class="modal-content" style="margin-top: 30vh; max-width: 300px;">
+        <div class="spinner"></div>
+        <h2 style="color: var(--blue); font-size: 18px; margin-bottom: 5px;">Đang quét...</h2>
+        <p style="color: #64748b; font-size: 13px; margin-top: 0;">AI đang xử lý dữ liệu</p>
+    </div>
+</div>
+
+<div id="resultModal" class="modal">
+    <div class="modal-content">
+        <span class="close-btn" onclick="closeModal()">&times;</span>
+        
+        <h2 style="margin: 0 0 10px; font-size: 18px; color: var(--blue); text-align: center;">KẾT QUẢ NHẬN DIỆN</h2>
+        
+        <img id="aiDrawnImage" style="width: 100%; max-height: 220px; object-fit: contain; border-radius: 8px; border: 2px solid #e2e8f0; display: none; margin-bottom: 10px;" alt="Ảnh AI khoanh vùng">
+
+        <div class="result-box">
+            <div style="font-size: 13px; color: #64748b;">Biển số xe:</div>
+            <div id="resPlate" class="plate-display">---</div>
+            
+            <div style="display: flex; justify-content: space-between; margin-top: 15px; font-size: 14px; border-top: 1px solid #e2e8f0; padding-top: 10px;">
+                <span style="color: #64748b; font-weight: bold;">Trạng thái:</span>
+                <span id="resStatus" class="status-VÔ">---</span>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 14px;">
+                <span style="color: #64748b; font-weight: bold;">Thời gian:</span>
+                <span id="resTime" style="font-weight: bold; color: #0f172a;">---</span>
+            </div>
+            
+            <div id="feeContainer" style="display: none; justify-content: space-between; align-items: center; margin-top: 10px; font-size: 16px; border-top: 2px dashed #cbd5e1; padding-top: 10px; background: #fffbeb; padding: 10px; border-radius: 8px;">
+                <span style="color: #d97706; font-weight: bold;">💸 TỔNG TIỀN:</span>
+                <div style="text-align: right;">
+                    <span id="resFee" style="font-weight: 900; color: #ea580c; font-size: 20px;">---</span><br>
+                    <span id="resDuration" style="font-size: 11px; color: #92400e;">---</span>
+                </div>
+            </div>
+
+            <div id="resMessage" style="margin-top: 15px; font-size: 13px; font-style: italic; color: #64748b;"></div>
+        </div>
+
+        <button class="btn" style="background:var(--green); color:white; margin-top:15px; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);" onclick="closeModalAndContinue()">✅ ĐÓNG & TIẾP TỤC BẮT XE</button>
+    </div>
+</div>
+
+<script>
+    let imageToUpload = null;
+
+    function pingServer() { fetch('/ping', { method: 'POST' }).catch(() => {}); }
+    setInterval(pingServer, 5000); 
+
+    async function startCamera() {
+        const video = document.getElementById('cameraStream');
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } } 
+            });
+            video.srcObject = stream;
+            video.style.display = 'block';
+            document.getElementById('snapBtn').style.display = 'flex';
+            document.getElementById('previewImage').style.display = 'none';
+            document.getElementById('mainScanBtn').style.display = 'none';
+            document.getElementById('uploadStatus').innerHTML = "";
+        } catch (e) { 
+            Swal.fire({ icon: 'error', title: 'Lỗi Camera', text: 'Không thể mở Camera. Vui lòng cấp quyền!', confirmButtonColor: '#2563eb' });
+        }
+    }
+
+    function takePhoto() {
+        const video = document.getElementById('cameraStream');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
+        const elementWidth = video.clientWidth;
+        const elementHeight = video.clientHeight;
+
+        const videoAspectRatio = videoWidth / videoHeight;
+        const elementAspectRatio = elementWidth / elementHeight;
+
+        let sourceX, sourceY, sourceWidth, sourceHeight;
+
+        if (elementAspectRatio > videoAspectRatio) {
+            sourceWidth = videoWidth;
+            sourceHeight = videoWidth / elementAspectRatio;
+            sourceX = 0;
+            sourceY = (videoHeight - sourceHeight) / 2; 
+        } else {
+            sourceHeight = videoHeight;
+            sourceWidth = videoHeight * elementAspectRatio;
+            sourceY = 0;
+            sourceX = (videoWidth - sourceWidth) / 2; 
+        }
+
+        canvas.width = sourceWidth;
+        canvas.height = sourceHeight;
+
+        ctx.drawImage(video, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, sourceWidth, sourceHeight);
+
+        canvas.toBlob(blob => {
+            imageToUpload = blob;
+            document.getElementById('previewImage').src = URL.createObjectURL(blob);
+            document.getElementById('previewImage').style.display = 'block';
+            video.style.display = 'none'; 
+            document.getElementById('snapBtn').style.display = 'none';
+            video.srcObject.getTracks().forEach(t => t.stop());
+            
+            uploadAndReadImage();
+        }, 'image/jpeg', 0.95);
+    }
+
+    function previewFile() {
+        const file = document.getElementById('imageInput').files[0];
+        if (file) {
+            imageToUpload = file;
+            const reader = new FileReader();
+            reader.onload = e => { 
+                document.getElementById('previewImage').src = e.target.result; 
+                document.getElementById('previewImage').style.display = 'block'; 
+                document.getElementById('mainScanBtn').style.display = 'block';
+                document.getElementById('cameraStream').style.display = 'none';
+                document.getElementById('snapBtn').style.display = 'none';
+                
+                const video = document.getElementById('cameraStream');
+                if(video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); }
+            };
+            reader.readAsDataURL(file);
+        }
+    }
+
+    async function uploadAndReadImage() {
+        if (!imageToUpload) {
+            Swal.fire({ icon: 'warning', title: 'Chưa có ảnh', text: 'Vui lòng chọn hoặc chụp ảnh!', confirmButtonColor: '#2563eb' });
+            return;
+        }
+        
+        const mainBtn = document.getElementById('mainScanBtn');
+        if(mainBtn) mainBtn.disabled = true;
+
+        document.getElementById('loadingModal').style.display = 'block';
+
+        const formData = new FormData();
+        formData.append('image', imageToUpload, 'plate.jpg');
+
+        try {
+            const res = await fetch('/upload-ocr', { method: 'POST', body: formData });
+            const data = await res.json();
+            
+            document.getElementById('loadingModal').style.display = 'none';
+            
+            if (res.ok) { showPopup(data); } 
+            else { Swal.fire({ icon: 'error', title: 'Nhận diện thất bại', text: data.error, confirmButtonColor: '#ef4444' }); }
+        } catch (e) { 
+            document.getElementById('loadingModal').style.display = 'none';
+            Swal.fire({ icon: 'error', title: 'Lỗi Kết Nối', text: 'Không thể kết nối đến máy chủ!', confirmButtonColor: '#ef4444' });
+        } finally {
+            if(mainBtn) mainBtn.disabled = false;
+        }
+    }
+
+    function showPopup(data) {
+        const imgEl = document.getElementById('aiDrawnImage');
+        if (data.image_base64 && data.image_base64 !== "") {
+            imgEl.src = "data:image/jpeg;base64," + data.image_base64;
+            imgEl.style.display = 'block';
+        } else {
+            imgEl.style.display = 'none'; 
+        }
+
+        document.getElementById('resPlate').innerText = data.plate;
+        
+        const statusEl = document.getElementById('resStatus');
+        
+        // --- THÊM ICON VÀ HIỂN THỊ TIỀN NẾU XE RA ---
+        if (data.status === "RA") {
+            statusEl.innerText = "📤 " + data.status;
+            statusEl.className = 'status-RA';
+            
+            document.getElementById('feeContainer').style.display = 'flex';
+            document.getElementById('resFee').innerText = data.fee.toLocaleString() + " đ";
+            document.getElementById('resDuration').innerText = "(Đậu: " + data.duration + ")";
+        } else {
+            statusEl.innerText = "📥 " + data.status;
+            statusEl.className = 'status-VÔ';
+            
+            document.getElementById('feeContainer').style.display = 'none';
+        }
+        
+        document.getElementById('resTime').innerText = data.time;
+        document.getElementById('resMessage').innerText = data.message;
+        
+        document.getElementById('resultModal').style.display = 'block';
+    }
+
+    function closeModal() { document.getElementById('resultModal').style.display = 'none'; }
+    function closeModalAndContinue() { closeModal(); document.getElementById('uploadStatus').innerHTML = ""; startCamera(); }
+</script>
+
+</body>
+</html>
