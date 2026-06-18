@@ -4,3 +4,4 @@ Pillow
 openpyxl
 opencv-python-headless
 numpy
+gunicorn
