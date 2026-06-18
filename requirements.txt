@@ -1,7 +1,7 @@
 Flask
-pytesseract
-Pillow
-openpyxl
+requests
 opencv-python-headless
 numpy
+Pillow
+openpyxl
 gunicorn
