@@ -10,8 +10,9 @@ import base64
 from datetime import datetime, timedelta
 import tkinter as tk
 from tkinter import ttk, messagebox
+import platform # Đã thêm: Kiểm tra hệ điều hành
 
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, render_template_string # Đã thêm: render_template_string
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter
 import openpyxl
@@ -29,7 +30,15 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(TEMP_IMAGES_DIR, exist_ok=True)
 
 DB_PARKING = os.path.join(DATA_DIR, 'parking.db')
-pytesseract.pytesseract.tesseract_cmd = os.path.join(DATA_DIR, 'Tesseract-OCR', 'tesseract.exe')
+
+# --- ĐÃ SỬA: SỬA ĐƯỜNG DẪN TESSERACT CHO PHÙ HỢP LOCAL VÀ RENDER ---
+# Dòng code cũ (Giữ lại dưới dạng comment để bạn đối chiếu):
+# pytesseract.pytesseract.tesseract_cmd = os.path.join(DATA_DIR, 'Tesseract-OCR', 'tesseract.exe')
+if platform.system() == 'Windows':
+    pytesseract.pytesseract.tesseract_cmd = os.path.join(DATA_DIR, 'Tesseract-OCR', 'tesseract.exe')
+else:
+    # Trên Linux (Render), tesseract_cmd gọi trực tiếp từ hệ thống
+    pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
 
 app = Flask(__name__)
 app.secret_key = 'parking_admin_secret_key'
@@ -68,12 +77,141 @@ def get_local_ip():
         return "127.0.0.1"
 
 # ==========================================
+# GIAO DIỆN WEB NHÚNG TRỰC TIẾP VÀO APP.PY (THAY CHO templates/index.html)
+# ==========================================
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Quét Biển Số Web</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px; text-align: center; }
+        .container { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { color: #1e293b; font-size: 24px;}
+        .btn { display: inline-block; background: #3b82f6; color: white; padding: 12px 20px; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; margin-top: 15px; font-weight: bold;}
+        .btn:hover { background: #2563eb; }
+        #preview { max-width: 100%; margin-top: 15px; border-radius: 8px; display: none; }
+        .result-box { margin-top: 20px; padding: 15px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; display: none; text-align: left; }
+        .success { color: #047857; font-weight: bold; font-size: 18px; margin-bottom: 10px;}
+        .error { color: #b91c1c; font-weight: bold; }
+        .loading { display: none; margin-top: 15px; font-weight: bold; color: #d97706; }
+        p { margin: 8px 0; font-size: 15px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📸 Chụp / Tải Ảnh Biển Số</h1>
+        <p style="color: #64748b;">Hệ thống tự động ghi nhận bãi & tính tiền</p>
+        
+        <input type="file" id="imageInput" accept="image/*" capture="environment" style="display: none;" onchange="previewImage(event)">
+        <label for="imageInput" class="btn" style="background: #10b981;">Tải ảnh lên / Mở Camera</label>
+        
+        <img id="preview" alt="Preview">
+        
+        <br>
+        <button id="uploadBtn" class="btn" onclick="uploadImage()" style="display: none; background: #ef4444;">Quét Biển Số</button>
+        
+        <div id="loading" class="loading">⏳ Đang xử lý hình ảnh OCR...</div>
+        
+        <div id="resultBox" class="result-box">
+            <div id="msg" class="success"></div>
+            <p><b>Biển số:</b> <span id="resPlate"></span></p>
+            <p><b>Trạng thái:</b> <span id="resStatus"></span></p>
+            <p><b>Thời gian đỗ:</b> <span id="resDuration"></span></p>
+            <p><b>Phí tính:</b> <span id="resFee"></span> VNĐ</p>
+            <img id="resImage" style="max-width: 100%; margin-top: 10px; border-radius: 8px;">
+        </div>
+    </div>
+
+    <script>
+        let selectedFile = null;
+
+        function previewImage(event) {
+            selectedFile = event.target.files[0];
+            if (selectedFile) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('preview').src = e.target.result;
+                    document.getElementById('preview').style.display = 'block';
+                    document.getElementById('uploadBtn').style.display = 'inline-block';
+                    document.getElementById('resultBox').style.display = 'none';
+                }
+                reader.readAsDataURL(selectedFile);
+            }
+        }
+
+        function uploadImage() {
+            if (!selectedFile) return alert("Vui lòng chọn ảnh trước!");
+            
+            let formData = new FormData();
+            formData.append("image", selectedFile);
+
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('resultBox').style.display = 'none';
+            document.getElementById('uploadBtn').disabled = true;
+
+            fetch('/upload-ocr', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('uploadBtn').disabled = false;
+                document.getElementById('resultBox').style.display = 'block';
+
+                if (data.error) {
+                    document.getElementById('resultBox').style.background = '#fef2f2';
+                    document.getElementById('resultBox').style.borderColor = '#fecaca';
+                    document.getElementById('msg').className = 'error';
+                    document.getElementById('msg').innerText = "❌ Lỗi: " + data.error;
+                    document.getElementById('resPlate').innerText = "-";
+                    document.getElementById('resStatus').innerText = "-";
+                    document.getElementById('resDuration').innerText = "-";
+                    document.getElementById('resFee').innerText = "-";
+                    document.getElementById('resImage').style.display = 'none';
+                } else {
+                    document.getElementById('resultBox').style.background = '#f0fdf4';
+                    document.getElementById('resultBox').style.borderColor = '#bbf7d0';
+                    document.getElementById('msg').className = 'success';
+                    document.getElementById('msg').innerText = "✅ " + data.message;
+                    document.getElementById('resPlate').innerText = data.plate;
+                    
+                    let statusColor = data.status === "VÔ" ? "#ef4444" : "#10b981";
+                    document.getElementById('resStatus').innerHTML = `<span style="color: ${statusColor}; font-weight:bold;">${data.status}</span>`;
+                    
+                    document.getElementById('resDuration').innerText = data.duration || "Đang ở trong bãi";
+                    document.getElementById('resFee').innerText = data.fee || "0";
+                    
+                    if (data.image_base64) {
+                        document.getElementById('resImage').src = "data:image/jpeg;base64," + data.image_base64;
+                        document.getElementById('resImage').style.display = 'block';
+                    }
+                }
+            })
+            .catch(err => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('uploadBtn').disabled = false;
+                alert("Lỗi kết nối tới máy chủ Render!");
+            });
+        }
+    </script>
+</body>
+</html>
+"""
+
+# ==========================================
 # 2. FLASK ROUTES (WEB NHẬN ẢNH)
 # ==========================================
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    # Dòng cũ (Bắt buộc giữ lại làm comment theo yêu cầu): 
+    # return render_template('index.html')
+    # Gọi template nhúng để gom vào duy nhất 1 file:
+    return render_template_string(HTML_TEMPLATE)
 
 @app.route('/ping', methods=['POST'])
 def ping():
@@ -373,15 +511,29 @@ class DesktopParkingApp:
         self.root.after(2000, self.update_dashboard)
 
 def run_flask_server():
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    # Render tự cấp phát biến môi trường PORT, nếu không có lấy mặc định 5000
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 if __name__ == '__main__':
     init_db()
     init_excel()
     
-    threading.Thread(target=run_flask_server, daemon=True).start()
-    
-    root = tk.Tk()
-    app_gui = DesktopParkingApp(root)
-    root.protocol("WM_DELETE_WINDOW", root.destroy)
-    root.mainloop()
+    # --- ĐÃ SỬA: TỰ ĐỘNG NHẬN DIỆN MÔI TRƯỜNG ĐỂ TRÁNH LỖI TKINTER TRÊN RENDER ---
+    if os.environ.get('RENDER') or os.environ.get('PORT'):
+        print("Môi trường: Render (Cloud Server). Đang khởi chạy luồng API...")
+        # Vì Render là Web Service, ta chạy app Flask bằng main thread để server sống
+        run_flask_server()
+    else:
+        print("Môi trường: Máy tính cá nhân (Local). Khởi chạy kèm Tkinter Admin...")
+        threading.Thread(target=run_flask_server, daemon=True).start()
+        
+        try:
+            root = tk.Tk()
+            app_gui = DesktopParkingApp(root)
+            root.protocol("WM_DELETE_WINDOW", root.destroy)
+            root.mainloop()
+        except Exception as e:
+            print("Không thể khởi động Desktop GUI. Giữ app Flask tiếp tục chạy ngầm...")
+            while True:
+                time.sleep(100)
